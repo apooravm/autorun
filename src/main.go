@@ -104,11 +104,11 @@ type AutorunConfig struct {
 	Cmd        string   `yaml:"cmd"`
 }
 
-func GenerateAutoRunConfig(path string) error {
+func GenerateAutoRunConfig(target_path string) error {
 	cfg := AutorunConfig{
-		Target_dir: "path",
+		Target_dir: target_path,
 		Exts:       []string{"go"},
-		Cmd:        "go run main.go",
+		Cmd:        "go run ./src/main.go",
 	}
 
 	data, err := yaml.Marshal(&cfg)
@@ -116,7 +116,8 @@ func GenerateAutoRunConfig(path string) error {
 		return err
 	}
 
-	if err = os.WriteFile(AUTORUN_CFG, data, 0644); err != nil {
+	autorun_path := filepath.Join(target_path, AUTORUN_CFG)
+	if err = os.WriteFile(autorun_path, data, 0644); err != nil {
 		return err
 	}
 
@@ -159,12 +160,15 @@ func main() {
 
 	switch os.Args[1] {
 	case "generate":
-		var t_path string = "./"
-		if len(os.Args) < 3 {
+		t_path, err := os.Getwd()
+		if err != nil {
+			fmt.Println("E:Getting absolute path", err.Error())
+			return
+		}
+		if len(os.Args) > 2 {
 			t_path = os.Args[2]
 		}
 
-		t_path = filepath.Join(t_path, AUTORUN_CFG)
 		if err := GenerateAutoRunConfig(t_path); err != nil {
 			fmt.Println("E:Generating config YAML", err.Error())
 			return
