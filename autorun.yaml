@@ -1,0 +1,4 @@
+config:
+  target_dir: "."
+  exts: [go]
+  cmd: "go run main.go"

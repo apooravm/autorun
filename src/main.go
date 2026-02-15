@@ -12,6 +12,11 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"gopkg.in/yaml.v3"
+)
+
+var (
+	AUTORUN_CFG string = "autorun.yaml"
 )
 
 type Runner struct {
@@ -87,15 +92,94 @@ func getSubDirs(rootpath string) ([]string, error) {
 	return dirs, nil
 }
 
+/**
+target root path = root_dir
+extension files to look out for = exts
+run command = cmd
+**/
+
+type AutorunConfig struct {
+	Target_dir string   `yaml:"target_dir"`
+	Exts       []string `yaml:"exts"`
+	Cmd        string   `yaml:"cmd"`
+}
+
+func GenerateAutoRunConfig(path string) error {
+	cfg := AutorunConfig{
+		Target_dir: "path",
+		Exts:       []string{"go"},
+		Cmd:        "go run main.go",
+	}
+
+	data, err := yaml.Marshal(&cfg)
+	if err != nil {
+		return err
+	}
+
+	if err = os.WriteFile(AUTORUN_CFG, data, 0644); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ReadAutorunConfig(path string) (*AutorunConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Println("E:Importing yaml file", err.Error())
+		return nil, err
+	}
+
+	var cfg AutorunConfig
+	err = yaml.Unmarshal(data, &cfg)
+	if err != nil {
+		log.Println("E:Unmarshalling YAML", err.Error())
+		return nil, err
+	}
+
+	return &cfg, nil
+}
+
 func main() {
 	// Add a path.
 	args := os.Args
 	if len(args) < 2 {
-		log.Println("no root path provided")
+		// Assume autorun cfg exists in curr dir
+		cfg, err := ReadAutorunConfig(AUTORUN_CFG)
+		if err != nil {
+			log.Println("E:Reading config YAML", err.Error())
+			return
+		} else {
+			// run...
+			StartWatcher(cfg)
+		}
+
 		return
 	}
 
-	dirs, err := getSubDirs(args[1])
+	switch os.Args[1] {
+	case "generate":
+		var t_path string = "./"
+		if len(os.Args) < 3 {
+			t_path = os.Args[2]
+		}
+
+		t_path = filepath.Join(t_path, AUTORUN_CFG)
+		if err := GenerateAutoRunConfig(t_path); err != nil {
+			fmt.Println("E:Generating config YAML", err.Error())
+			return
+		}
+		fmt.Println("Created at", t_path)
+		return
+
+	default:
+		fmt.Println("...")
+		return
+	}
+}
+
+func StartWatcher(cfg *AutorunConfig) {
+	dirs, err := getSubDirs(cfg.Target_dir)
 	if err != nil {
 		fmt.Println("Error", err.Error())
 		return
@@ -111,7 +195,7 @@ func main() {
 		}
 	}
 
-	cmd_str := fmt.Sprintf("cd %s && go run main.go", args[1])
+	cmd_str := fmt.Sprintf("cd %s && %s", cfg.Target_dir, cfg.Cmd)
 	runner := &Runner{cmd: cmd_str}
 	runner.Start()
 
@@ -124,8 +208,10 @@ func main() {
 	// validation loop, runs forever in bg
 	go func() {
 		for e := range watcher.Events {
-			if strings.HasSuffix(e.Name, ".go") {
-				trigger <- struct{}{}
+			for _, ext := range cfg.Exts {
+				if strings.HasSuffix(e.Name, "."+ext) {
+					trigger <- struct{}{}
+				}
 			}
 		}
 	}()
@@ -155,51 +241,4 @@ func debounce(ch <-chan struct{}, delay time.Duration) <-chan struct{} {
 		}
 	}()
 	return out
-}
-
-func main2() {
-	// Create new watcher.
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer watcher.Close()
-
-	// Start listening for events.
-	go func() {
-		for {
-			select {
-			case event, ok := <-watcher.Events:
-				if !ok {
-					return
-				}
-				// log.Println("event:", event)
-				if event.Has(fsnotify.Write) {
-					log.Println("modified file:", event.Name)
-				}
-			case err, ok := <-watcher.Errors:
-				if !ok {
-					return
-				}
-				log.Println("error:", err)
-			}
-		}
-	}()
-
-	// Add a path.
-	args := os.Args
-	if len(args) < 2 {
-		log.Println("no path provided")
-		return
-	}
-
-	fmt.Println("Watching ", args[1])
-
-	err = watcher.Add(args[1])
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Block main goroutine forever.
-	<-make(chan struct{})
 }
